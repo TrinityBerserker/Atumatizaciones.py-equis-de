@@ -1,0 +1,101 @@
+import wikipedia
+import requests
+import openai
+from rich import print
+from rich.prompt import Prompt
+
+# Configuraciones
+wikipedia.set_lang("es")
+openai.api_key = "TU_CLAVE_API_AQUI"  # <--- Pega aquí tu API key de OpenAI
+news_api_key = ""  # Opcional: API Key para noticias (NewsAPI), deja vacío si no tienes
+
+def buscar_wikipedia(consulta):
+    palabras = consulta.lower().replace("quien es", "").replace("quién es", "").replace("dime", "").strip()
+    try:
+        resultado = wikipedia.summary(palabras, sentences=3, auto_suggest=True)
+        return resultado
+    except wikipedia.exceptions.DisambiguationError as e:
+        return f"Tu búsqueda es ambigua. Intenta ser más específico: {e.options[:5]}"
+    except wikipedia.exceptions.PageError:
+        try:
+            wikipedia.set_lang("en")
+            resultado = wikipedia.summary(palabras, sentences=3, auto_suggest=True)
+            wikipedia.set_lang("es")
+            return resultado
+        except Exception:
+            wikipedia.set_lang("es")
+            return "No encontré información sobre eso."
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def obtener_noticias(api_key, pais='mx'):
+    url = f"https://newsapi.org/v2/top-headlines?country={pais}&apiKey={api_key}"
+    try:
+        respuesta = requests.get(url)
+        data = respuesta.json()
+        if data['status'] == 'ok':
+            articulos = data['articles'][:5]
+            noticias = ""
+            for i, art in enumerate(articulos, 1):
+                noticias += f"{i}. [bold]{art['title']}[/bold]\n   Fuente: {art['source']['name']}\n"
+            return noticias
+        else:
+            return "No pude obtener noticias ahora."
+    except Exception as e:
+        return f"Error al obtener noticias: {str(e)}"
+
+def consulta_gpt(mensaje):
+    try:
+        respuesta = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Eres un asistente útil y amable."},
+                {"role": "user", "content": mensaje},
+            ],
+            max_tokens=300,
+            temperature=0.7,
+        )
+        return respuesta.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error al comunicarse con OpenAI: {str(e)}"
+
+def main():
+    print("[bold green]¡Hola! Soy tu bot informativo avanzado.[/bold green]")
+    
+    while True:
+        pregunta = Prompt.ask("\n¿Qué quieres saber? (escribe 'salir' para terminar)").strip()
+        if pregunta.lower() == "salir":
+            print("¡Adiós! Que tengas un buen día.")
+            break
+        
+        # Preguntas sobre noticias
+        if "noticias" in pregunta.lower() or "noticia" in pregunta.lower():
+            if news_api_key:
+                print("[bold blue]Buscando noticias para ti...[/bold blue]")
+                noticias = obtener_noticias(news_api_key)
+                print(noticias)
+            else:
+                print("[red]No tienes configurada la API de noticias. Puedo responder con GPT o Wikipedia.[/red]")
+                respuesta = consulta_gpt(pregunta)
+                print(f"\nGPT dice:\n{respuesta}")
+        
+        # Preguntas que parecen sobre personajes o definiciones, buscar Wikipedia primero
+        elif any(p in pregunta.lower() for p in ["quien", "qué es", "quién", "definición", "significa", "dime"]):
+            print("[bold blue]Buscando en Wikipedia...[/bold blue]")
+            resultado = buscar_wikipedia(pregunta)
+            if resultado == "No encontré información sobre eso.":
+                # Si no hay resultado en Wikipedia, consulta GPT
+                print("[yellow]No encontré en Wikipedia, consultando con GPT...[/yellow]")
+                respuesta = consulta_gpt(pregunta)
+                print(f"\nGPT dice:\n{respuesta}")
+            else:
+                print(resultado)
+        
+        # Para cualquier otra consulta, usa GPT directamente
+        else:
+            print("[bold blue]Consultando con GPT...[/bold blue]")
+            respuesta = consulta_gpt(pregunta)
+            print(f"\nGPT dice:\n{respuesta}")
+
+if __name__ == "__main__":
+    main()
